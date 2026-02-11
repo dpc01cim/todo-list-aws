@@ -13,17 +13,14 @@ image_repositories = []
 [staging]
 [staging.deploy]
 [staging.deploy.parameters]
-stack_name = "staging-todo-list-aws"
+stack_name = "todo-list-aws-staging"
 s3_bucket = "todo-list-aws-staging-artifacts-123456"
-s3_prefix = "staging-todo-list-aws"
+s3_prefix = "todo-list-aws"
+region = "us-east-1"
 capabilities = "CAPABILITY_IAM"
 parameter_overrides = "Stage=\"staging\""
 image_repositories = []
-confirm_changeset = true
 
-
-[staging.global.parameters]
-region = "us-east-1"
 [production]
 [production.deploy]
 [production.deploy.parameters]
