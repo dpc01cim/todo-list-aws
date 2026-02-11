@@ -140,7 +140,6 @@ pipeline {
                         """
                     }
                 }
-        
                 junit 'result-rest.xml'
             }
         }
@@ -164,8 +163,8 @@ pipeline {
                 git checkout master
                 git reset --hard origin/master
         
-                # Merge develop SIN commit automático
-                git merge origin/develop --no-commit --no-ff
+                # Permitimos conflicto
+                git merge origin/develop --no-commit --no-ff  || true
         
                 echo "Restaurando Jenkinsfile de master..."
                 git checkout origin/master -- Jenkinsfile
@@ -178,13 +177,6 @@ pipeline {
                 echo "Promoción completada"
                 '''
             }
-        }
-
-    }
-
-    post {
-        always {
-            sh 'rm -rf venv'
         }
     }
 }
