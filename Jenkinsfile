@@ -1,0 +1,190 @@
+pipeline {
+    agent any
+    
+    options {
+        timestamps()
+        skipDefaultCheckout()
+        timeout(time: 5, unit: 'MINUTES')
+    }
+    
+    environment {
+        GITHUB_TOKEN = credentials('github-token')
+    }
+
+    stages {
+
+        stage('Get code') {
+            steps {
+                catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
+                    cleanWs()
+                    echo '[Etapa Get Code] Obteniendo código de GitHub (Develop)...'
+
+                    // Info básica del entorno
+                    sh '''#!/bin/bash
+                    whoami
+                    hostname
+                    echo "Workspace: ${WORKSPACE}"
+                    '''
+
+                    // Clonar código
+                    git branch: 'develop', url: 'https://github.com/dpc01cim/todo-list-aws.git', credentialsId: 'github-token'
+
+                    // Crear venv e instalar dependencias
+                    sh '''#!/bin/bash
+                    set -e
+                    python3 -m venv venv
+                    source venv/bin/activate
+                    pip install --upgrade pip
+                    pip install flake8 bandit pytest requests
+                    '''
+                }
+            }
+        }
+
+        stage('Static Test') {
+            steps {
+                sh '''#!/bin/bash
+                set -e
+
+                source venv/bin/activate
+                mkdir -p reports
+        
+                flake8 src --statistics --count --tee --output-file reports/flake8.txt || true
+                test -s reports/flake8.txt || echo "No flake8 issues" > reports/flake8.txt
+        
+                bandit -r src -f txt -o reports/bandit.txt || true
+                test -s reports/bandit.txt || echo "No bandit issues" > reports/bandit.txt
+        
+                echo "== Flake8 report (tail) =="
+                tail -n 50 reports/flake8.txt || true
+                echo "== Bandit report (tail) =="
+                tail -n 50 reports/bandit.txt || true
+                '''
+            }
+            post {
+                always {
+                    archiveArtifacts artifacts: 'reports/*.txt', fingerprint: true
+                }
+            }
+        }
+
+        stage('Deploy') {
+            environment {
+                AWS_DEFAULT_REGION = "us-east-1"
+            }
+            steps {
+                sh '''#!/bin/bash
+                set -e
+
+                echo "== Validando template SAM =="
+                sam validate --template-file template.yaml --lint
+
+                echo "== Construyendo proyecto SAM =="
+                sam build
+
+                echo "== Desplegando usando samconfig.toml =="
+                sam deploy --config-env staging --no-confirm-changeset --no-fail-on-empty-changeset
+
+                echo "== Despliegue completado =="
+                echo "Obteniendo BaseUrlApi desde CloudFormation..."
+                aws cloudformation describe-stacks \
+                    --stack-name staging-todo-list-aws \
+                    --region us-east-1 \
+                    --query "Stacks[0].Outputs[?OutputKey=='BaseUrlApi'].OutputValue" \
+                    --output text > baseurl.txt
+                '''
+                
+                script {
+                    env.BASE_URL_API = readFile('baseurl.txt').trim()
+                    echo "Base URL detectada: ${env.BASE_URL_API}"
+                }
+            }
+        }
+        
+        stage('Rest Test') {
+            steps {
+                echo "Workspace: ${WORKSPACE}"
+                sh 'echo "Usuario: $(whoami)"'
+                sh 'echo "Host: $(hostname)"'
+                echo "Base URL detectada: ${env.BASE_URL_API}"
+        
+                catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
+                    script {
+                        def baseUrl = env.BASE_URL_API
+        
+                        sh """#!/bin/bash
+                            set -e
+        
+                            source venv/bin/activate
+                            export PYTHONPATH=\$WORKSPACE
+                            export BASE_URL="${baseUrl}"
+        
+                            echo "Esperando a que la API esté disponible en \$BASE_URL/todos..."
+        
+                            for i in {1..15}; do
+                                STATUS=\$(curl -s -o /dev/null -w "%{http_code}" \$BASE_URL/todos)
+                                if [ "\$STATUS" = "200" ]; then
+                                    echo "API disponible."
+                                    break
+                                fi
+                                echo "Intento \$i: API no disponible aún (HTTP \$STATUS)..."
+                                sleep 2
+                                if [ "\$i" -eq 15 ]; then
+                                    echo "Timeout esperando a la API"
+                                    exit 1
+                                fi
+                            done
+        
+                            echo "Ejecutando pruebas de integración..."
+                            pytest --junitxml=result-rest.xml test/integration/todoApiTest.py
+                        """
+                    }
+                }
+        
+                junit 'result-rest.xml'
+            }
+        }
+        
+        stage('Promote') {
+            when {
+                expression { currentBuild.currentResult == 'SUCCESS' }
+            }
+            steps {
+                echo '[Promote] Merge develop → master preservando Jenkinsfile de producción'
+        
+                sh '''#!/bin/bash
+                set -e
+        
+                git config user.email "jenkins@ci.local"
+                git config user.name "Jenkins CI"
+        
+                git fetch origin
+        
+                # Ir a master limpio
+                git checkout master
+                git reset --hard origin/master
+        
+                # Merge develop SIN commit automático
+                git merge origin/develop --no-commit --no-ff
+        
+                echo "Restaurando Jenkinsfile de master..."
+                git checkout origin/master -- Jenkinsfile
+        
+                git add Jenkinsfile
+                git commit -m "Promote develop → master (preservando Jenkinsfile prod)"
+        
+                git push https://${GITHUB_TOKEN}@github.com/dpc01cim/todo-list-aws.git master
+        
+                echo "Promoción completada"
+                '''
+            }
+        }
+
+    }
+
+    post {
+        always {
+            sh 'rm -rf venv'
+        }
+    }
+}
