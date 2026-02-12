@@ -1,1 +1,122 @@
+pipeline {
+    agent any
+    
+    options {
+        timestamps()
+        skipDefaultCheckout()
+        timeout(time: 5, unit: 'MINUTES')
+    }
 
+    stages {
+
+        stage('Get code') {
+            steps {
+                catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
+                    cleanWs()
+                    echo '[Etapa Get Code] Obteniendo código de GitHub (Develop)...'
+
+                    // Info básica del entorno
+                    sh '''#!/bin/bash
+                    whoami
+                    hostname
+                    echo "Workspace: ${WORKSPACE}"
+                    '''
+
+                    // Clonar código
+                    git branch: 'master', url: 'https://github.com/dpc01cim/todo-list-aws.git', credentialsId: 'github-token'
+                    stash name: 'code', includes: '**/*', excludes: '.git/**'
+
+                    // Crear venv e instalar dependencias
+                    sh '''#!/bin/bash
+                    set -e
+                    python3 -m venv venv
+                    source venv/bin/activate
+                    pip install --upgrade pip
+                    pip install flake8 bandit pytest requests
+                    '''
+                }
+            }
+        }
+
+        stage('Deploy') {
+            environment {
+                AWS_DEFAULT_REGION = "us-east-1"
+            }
+            steps {
+                unstash 'code'
+                sh '''#!/bin/bash
+                set -e
+
+                echo "== Validando template SAM =="
+                sam validate --template-file template.yaml --lint
+
+                echo "== Construyendo proyecto SAM =="
+                sam build
+
+                echo "== Desplegando usando samconfig.toml =="
+                sam deploy --config-env production --no-confirm-changeset --no-fail-on-empty-changeset
+
+                echo "== Despliegue completado =="
+                echo "Obteniendo BaseUrlApi desde CloudFormation..."
+                aws cloudformation describe-stacks \
+                    --stack-name todo-list-aws-production \
+                    --region us-east-1 \
+                    --query "Stacks[0].Outputs[?OutputKey=='BaseUrlApi'].OutputValue" \
+                    --output text > baseurl.txt
+                '''
+                
+                script {
+                    env.BASE_URL_API = readFile('baseurl.txt').trim()
+                    echo "Base URL detectada: ${env.BASE_URL_API}"
+                }
+            }
+        }
+        
+        stage('Rest Test') {
+            agent { label 'rest' }
+            steps {
+                echo "Workspace: ${WORKSPACE}"
+                sh 'echo "Usuario: $(whoami)"'
+                sh 'echo "Host: $(hostname)"'
+                echo "Base URL detectada: ${env.BASE_URL_API}"
+                unstash 'code'
+        
+                catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
+                    script {
+                        def baseUrl = env.BASE_URL_API
+        
+                        sh """#!/bin/bash
+                            set -e
+        
+                            source venv/bin/activate
+                            export PYTHONPATH=\$WORKSPACE
+                            export BASE_URL="${baseUrl}"
+        
+                            echo "Esperando a que la API esté disponible en \$BASE_URL/todos..."
+        
+                            for i in {1..15}; do
+                                STATUS=\$(curl -s -o /dev/null -w "%{http_code}" \$BASE_URL/todos)
+                                if [ "\$STATUS" = "200" ]; then
+                                    echo "API disponible."
+                                    break
+                                fi
+                                echo "Intento \$i: API no disponible aún (HTTP \$STATUS)..."
+                                sleep 2
+                                if [ "\$i" -eq 15 ]; then
+                                    echo "Timeout esperando a la API"
+                                    exit 1
+                                fi
+                            done
+        
+                            echo "Ejecutando pruebas de integración..."
+                            pytest --junitxml=result-rest.xml  \
+                              test/integration/todoApiTest.py::TestApi::test_api_listtodos \
+                              test/integration/todoApiTest.py::TestApi::test_api_gettodo
+                        """
+                    }
+                }
+                junit 'result-rest.xml'
+            }
+        }
+    }
+}
