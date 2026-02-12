@@ -168,11 +168,12 @@ pipeline {
                 # Permitimos conflicto
                 git merge origin/develop --no-commit --no-ff  || true
         
-                echo "Restaurando Jenkinsfile de master..."
+                echo "Restaurando Jenkinsfile y Jenkinsfile_agentes de master..."
                 git checkout origin/master -- Jenkinsfile
+                git checkout origin/master -- Jenkinsfile_agentes
         
                 git add Jenkinsfile
-                git commit -m "Promote develop → master (preservando Jenkinsfile prod)"
+                git commit -m "Promote develop → master (preservando Jenkinsfile/Jenkinsfile_agentes prod)"
         
                 git push https://${GITHUB_TOKEN}@github.com/dpc01cim/todo-list-aws.git master
         
