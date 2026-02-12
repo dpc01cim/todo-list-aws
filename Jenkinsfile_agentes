@@ -24,7 +24,7 @@ pipeline {
 
                     // Clonar código
                     git branch: 'master', url: 'https://github.com/dpc01cim/todo-list-aws.git', credentialsId: 'github-token'
-                    stash name: 'code', includes: '**/*', excludes: '.git/**'
+                    stash name: 'code', includes: '**/*,.*', useDefaultExcludes: false
 
                     // Crear venv e instalar dependencias
                     sh '''#!/bin/bash
