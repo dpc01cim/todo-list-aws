@@ -5,7 +5,6 @@ pipeline {
         timestamps()
         skipDefaultCheckout()
         timeout(time: 5, unit: 'MINUTES')
-        disableConcurrentBuilds()
     }
     
     environment {
@@ -29,6 +28,7 @@ pipeline {
 
                     // Clonar código
                     git branch: 'develop', url: 'https://github.com/dpc01cim/todo-list-aws.git', credentialsId: 'github-token'
+                    stash name: 'code', includes: '**/*,.*', useDefaultExcludes: false
 
                     // Crear venv e instalar dependencias
                     sh '''#!/bin/bash
@@ -45,6 +45,7 @@ pipeline {
         stage('Static Test') {
             agent { label 'static' }
             steps {
+                unstash 'code'
                 sh '''#!/bin/bash
                 set -e
 
@@ -75,6 +76,7 @@ pipeline {
                 AWS_DEFAULT_REGION = "us-east-1"
             }
             steps {
+                unstash 'code'
                 sh '''#!/bin/bash
                 set -e
 
@@ -110,6 +112,7 @@ pipeline {
                 sh 'echo "Usuario: $(whoami)"'
                 sh 'echo "Host: $(hostname)"'
                 echo "Base URL detectada: ${env.BASE_URL_API}"
+                unstash 'code'
         
                 catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
                     script {
@@ -153,6 +156,7 @@ pipeline {
             }
             steps {
                 echo '[Promote] Merge develop → master preservando Jenkinsfile de producción'
+                unstash 'code'
         
                 sh '''#!/bin/bash
                 set -e
