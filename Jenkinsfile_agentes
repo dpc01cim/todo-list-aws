@@ -88,7 +88,10 @@ pipeline {
                         sh """#!/bin/bash
                             set -e
         
+                            python3 -m venv venv
                             source venv/bin/activate
+                            pip install --upgrade pip
+                            pip install flake8 bandit pytest requests
                             export PYTHONPATH=\$WORKSPACE
                             export BASE_URL="${baseUrl}"
         
