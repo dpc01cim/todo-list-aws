@@ -24,6 +24,10 @@ pipeline {
 
                     // Clonar código
                     git branch: 'master', url: 'https://github.com/dpc01cim/todo-list-aws.git', credentialsId: 'github-token'
+
+                    // Obtenemos la configuración de staging
+                    sh 'curl -O https://raw.githubusercontent.com/dpc01cim/todo-list-aws-config/refs/heads/staging/samconfig.toml'
+
                     stash name: 'code', includes: '**/*', excludes: '.git/**'
 
                     // Crear venv e instalar dependencias
