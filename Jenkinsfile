@@ -49,7 +49,11 @@ pipeline {
                 sh '''#!/bin/bash
                 set -e
 
+                python3 -m venv venv
                 source venv/bin/activate
+                pip install --upgrade pip
+                pip install flake8 bandit pytest requests
+                
                 mkdir -p reports
         
                 flake8 src --statistics --count --tee --output-file reports/flake8.txt || true
