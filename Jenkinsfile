@@ -29,9 +29,6 @@ pipeline {
                     // Clonar código
                     git branch: 'develop', url: 'https://github.com/dpc01cim/todo-list-aws.git', credentialsId: 'github-token'
 
-                    // Obtenemos la configuración de staging
-                    sh 'curl -O https://raw.githubusercontent.com/dpc01cim/todo-list-aws-config/refs/heads/staging/samconfig.toml'
-
                     // Crear venv e instalar dependencias
                     sh '''#!/bin/bash
                     set -e
@@ -49,11 +46,7 @@ pipeline {
                 sh '''#!/bin/bash
                 set -e
 
-                python3 -m venv venv
                 source venv/bin/activate
-                pip install --upgrade pip
-                pip install flake8 bandit pytest requests
-                
                 mkdir -p reports
         
                 flake8 src --statistics --count --tee --output-file reports/flake8.txt || true
